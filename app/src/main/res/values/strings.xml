@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ScarletFlow</string>
+    <string name="accessibility_service_description">ScarletFlow 需要无障碍权限来自动在小红书直播间发送消息。此服务仅用于自动回复功能，不会收集任何个人信息。</string>
+</resources>

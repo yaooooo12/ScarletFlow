@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:background="@drawable/floating_bg"
+    android:padding="8dp"
+    android:elevation="8dp">
+
+    <!-- 主按钮 -->
+    <FrameLayout
+        android:id="@+id/btnFloatingToggle"
+        android:layout_width="56dp"
+        android:layout_height="56dp"
+        android:background="@drawable/floating_btn_stopped"
+        android:clickable="true"
+        android:focusable="true">
+
+        <ImageView
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:layout_gravity="center"
+            android:src="@drawable/ic_play"
+            android:contentDescription="Toggle" />
+
+    </FrameLayout>
+
+    <!-- 状态和关闭 -->
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:layout_marginStart="8dp"
+        android:layout_marginEnd="4dp">
+
+        <TextView
+            android:id="@+id/tvFloatingStatus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="已停止"
+            android:textSize="12sp"
+            android:textColor="@color/gray" />
+
+        <ImageView
+            android:id="@+id/btnFloatingClose"
+            android:layout_width="20dp"
+            android:layout_height="20dp"
+            android:layout_marginTop="4dp"
+            android:src="@drawable/ic_close"
+            android:clickable="true"
+            android:focusable="true"
+            android:contentDescription="Close" />
+
+    </LinearLayout>
+
+</LinearLayout>
