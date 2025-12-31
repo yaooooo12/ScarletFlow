@@ -52,6 +52,94 @@ class AutoReplyService : AccessibilityService() {
     private var humanMode = true // 拟人模式
     private var sendCount = 0
 
+    // 打错字概率 (5% = 人类正常打字错误率)
+    private val typoRate = 0.05
+
+    /**
+     * 拼音相似字映射表
+     * 模拟人类在拼音输入法上常见的打错情况
+     */
+    private val pinyinSimilarChars = mapOf(
+        // 声母相近 (z/c/s, zh/ch/sh, n/l, f/h, r/l)
+        '在' to listOf('才', '再', '载'),
+        '是' to listOf('时', '事', '市', '式', '十'),
+        '不' to listOf('步', '部', '布', '补'),
+        '了' to listOf('乐', '勒', '累'),
+        '我' to listOf('握', '窝', '卧'),
+        '你' to listOf('泥', '逆', '腻', '拟'),
+        '的' to listOf('地', '得', '底', '弟'),
+        '他' to listOf('她', '它', '塔', '踏'),
+        '好' to listOf('号', '浩', '耗', '毫'),
+        '这' to listOf('着', '者', '浙', '遮'),
+        '有' to listOf('又', '友', '右', '优', '由'),
+        '大' to listOf('达', '打', '答'),
+        '人' to listOf('仁', '忍', '认', '任'),
+        '来' to listOf('赖', '莱', '睐', '籁'),
+        '吗' to listOf('妈', '马', '码', '嘛', '骂'),
+        '什' to listOf('深', '神', '身', '审'),
+        '么' to listOf('没', '们', '闷', '蒙'),
+        '哈' to listOf('哈', '蛤', '铪'),
+        '啊' to listOf('阿', '呵', '吖'),
+        '哦' to listOf('噢', '喔', '欧'),
+        '嗯' to listOf('恩', '嗯', '摁'),
+        '呢' to listOf('那', '呐', '纳'),
+        '吧' to listOf('把', '爸', '八', '巴'),
+        '呀' to listOf('雅', '鸦', '压', '押'),
+        '嘿' to listOf('黑', '嗨', '咳'),
+        '喜' to listOf('洗', '西', '习', '细', '系'),
+        '欢' to listOf('换', '环', '还', '幻', '唤'),
+        '爱' to listOf('唉', '矮', '艾', '碍'),
+        '想' to listOf('响', '向', '像', '象', '项'),
+        '看' to listOf('砍', '侃', '刊', '坎'),
+        '说' to listOf('所', '锁', '索', '缩'),
+        '听' to listOf('停', '廷', '挺', '艇'),
+        '真' to listOf('珍', '针', '侦', '斟', '震'),
+        '太' to listOf('台', '态', '泰', '汰'),
+        '棒' to listOf('帮', '邦', '绑', '傍', '榜'),
+        '厉' to listOf('力', '历', '立', '丽', '利'),
+        '害' to listOf('还', '海', '孩', '咳'),
+        '哇' to listOf('挖', '娃', '瓦', '袜'),
+        '牛' to listOf('扭', '纽', '钮', '妞'),
+        '赞' to listOf('暂', '攒', '咱', '簪'),
+        '支' to listOf('只', '知', '之', '直', '值', '枝'),
+        '持' to listOf('迟', '池', '驰', '尺', '齿'),
+        '加' to listOf('家', '夹', '假', '价', '嘉'),
+        '油' to listOf('有', '又', '游', '由', '优', '犹'),
+        '冲' to listOf('充', '虫', '宠', '崇'),
+        '鸭' to listOf('呀', '压', '押', '雅'),
+        '起' to listOf('气', '七', '期', '其', '奇', '启'),
+        '开' to listOf('凯', '慨', '楷', '揩'),
+        '心' to listOf('新', '欣', '辛', '信', '芯', '薪'),
+        '快' to listOf('块', '筷', '侩', '脍'),
+        '乐' to listOf('了', '勒', '雷', '累'),
+        '可' to listOf('克', '刻', '客', '渴', '科'),
+        '以' to listOf('已', '亿', '易', '艺', '译'),
+        '很' to listOf('恨', '狠', '痕'),
+        '非' to listOf('飞', '肥', '妃', '菲', '费'),
+        '常' to listOf('场', '长', '唱', '畅', '尝'),
+        '感' to listOf('干', '赶', '敢', '甘', '杆'),
+        '谢' to listOf('写', '泻', '卸', '械', '解'),
+        '帅' to listOf('衰', '率', '甩', '摔'),
+        '美' to listOf('每', '妹', '梅', '眉', '没'),
+        '漂' to listOf('飘', '票', '瓢', '嫖'),
+        '亮' to listOf('量', '凉', '两', '辆', '良'),
+        '酷' to listOf('哭', '苦', '库', '裤', '酷'),
+        '帮' to listOf('棒', '邦', '绑', '傍', '榜'),
+        '多' to listOf('朵', '夺', '躲', '堕'),
+        '少' to listOf('烧', '稍', '捎', '梢'),
+        '点' to listOf('电', '店', '典', '颠', '掂'),
+        '一' to listOf('衣', '医', '依', '已', '以'),
+        '二' to listOf('尔', '耳', '儿', '饵'),
+        '三' to listOf('山', '散', '伞', '叁'),
+        '四' to listOf('死', '丝', '思', '斯', '私'),
+        '五' to listOf('午', '武', '舞', '务', '物'),
+        '六' to listOf('流', '留', '刘', '柳', '陆'),
+        '七' to listOf('起', '期', '其', '奇', '棋'),
+        '八' to listOf('吧', '把', '爸', '巴', '拔'),
+        '九' to listOf('就', '久', '酒', '旧', '救'),
+        '十' to listOf('时', '是', '事', '市', '石')
+    )
+
     /**
      * 随机获取一条回复内容
      */
@@ -253,26 +341,28 @@ class AutoReplyService : AccessibilityService() {
         try {
             // 尝试找到输入框并发送消息
             if (findAndClickInputBox(rootNode)) {
-                // 计算拟人延迟：根据内容长度模拟打字时间
-                val typingDelay = getHumanTypingDelay(contentToSend)
-                Log.d(TAG, "Human typing delay: ${typingDelay}ms for ${contentToSend.length} chars")
+                Log.d(TAG, "Starting char-by-char input for ${contentToSend.length} chars")
 
+                // 点击输入框后，短暂延迟再开始逐字输入
+                val focusDelay = 200L + Random.nextInt(200) // 200-400ms 等待输入框聚焦
                 mainHandler.postDelayed({
                     try {
-                        inputText(contentToSend)
-                        // 输入完成后稍等一下再点发送，模拟检查内容
-                        val sendDelay = 300L + Random.nextInt(400) // 300-700ms
-                        mainHandler.postDelayed({
-                            try {
-                                clickSendButton()
-                            } catch (e: Exception) {
-                                Log.e(TAG, "Error in clickSendButton", e)
-                            }
-                        }, sendDelay)
+                        // 使用逐字输入，完成后再点击发送
+                        inputText(contentToSend) {
+                            // 输入完成后的回调，稍等一下再点发送（模拟检查内容）
+                            val sendDelay = 300L + Random.nextInt(400) // 300-700ms
+                            mainHandler.postDelayed({
+                                try {
+                                    clickSendButton()
+                                } catch (e: Exception) {
+                                    Log.e(TAG, "Error in clickSendButton", e)
+                                }
+                            }, sendDelay)
+                        }
                     } catch (e: Exception) {
                         Log.e(TAG, "Error in inputText", e)
                     }
-                }, typingDelay)
+                }, focusDelay)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error performing auto reply", e)
@@ -330,11 +420,13 @@ class AutoReplyService : AccessibilityService() {
         return false
     }
 
-    private fun inputText(text: String) {
+    /**
+     * 原始的一次性输入方法（保留作为备用）
+     */
+    private fun inputTextDirect(text: String) {
         val rootNode = rootInActiveWindow ?: return
 
         try {
-            // 找到当前焦点的输入框
             val focusedNode = rootNode.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
             if (focusedNode != null) {
                 val arguments = Bundle()
@@ -343,10 +435,9 @@ class AutoReplyService : AccessibilityService() {
                     text
                 )
                 focusedNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
-                Log.d(TAG, "Text input: $text")
+                Log.d(TAG, "Text input direct: $text")
                 focusedNode.recycle()
             } else {
-                // 备用方案：找到所有EditText并设置文本
                 val editTexts = findNodesByClassName(rootNode, "android.widget.EditText")
                 for (editText in editTexts) {
                     val arguments = Bundle()
@@ -355,13 +446,170 @@ class AutoReplyService : AccessibilityService() {
                         text
                     )
                     editText.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
-                    Log.d(TAG, "Text input via EditText: $text")
                 }
                 editTexts.forEach { it.recycle() }
             }
         } finally {
             rootNode.recycle()
         }
+    }
+
+    /**
+     * 获取拼音相似的错误字符
+     * 如果字符在映射表中，随机返回一个相似字；否则返回原字符
+     */
+    private fun getTypoChar(char: Char): Char {
+        val similarChars = pinyinSimilarChars[char]
+        return if (similarChars != null && similarChars.isNotEmpty()) {
+            similarChars[Random.nextInt(similarChars.size)]
+        } else {
+            char
+        }
+    }
+
+    /**
+     * 逐字输入文本（带打错字和修正效果）
+     * @param text 要输入的完整文本
+     * @param onComplete 输入完成后的回调
+     */
+    private fun inputTextCharByChar(text: String, onComplete: () -> Unit) {
+        if (!humanMode) {
+            // 非拟人模式，直接一次性输入
+            inputTextDirect(text)
+            onComplete()
+            return
+        }
+
+        val chars = text.toCharArray()
+        var currentIndex = 0
+        var currentText = StringBuilder()
+        var pendingTypoFix = false  // 是否有待修正的错字
+        var correctChar: Char = ' ' // 正确的字符
+
+        fun scheduleNextChar() {
+            if (pendingTypoFix) {
+                // 需要修正错字：先删除错字，再输入正确的
+                val deleteDelay = 100L + Random.nextInt(150) // 100-250ms 发现错误
+                mainHandler.postDelayed({
+                    // 删除最后一个字符（模拟退格）
+                    currentText.deleteCharAt(currentText.length - 1)
+                    setTextToInputField(currentText.toString())
+                    Log.d(TAG, "Deleted typo, current: $currentText")
+
+                    // 再输入正确的字符
+                    val retypeDelay = 80L + Random.nextInt(120) // 80-200ms 重新输入
+                    mainHandler.postDelayed({
+                        currentText.append(correctChar)
+                        setTextToInputField(currentText.toString())
+                        Log.d(TAG, "Fixed typo, current: $currentText")
+                        pendingTypoFix = false
+
+                        // 继续下一个字符
+                        val nextDelay = getCharInputDelay()
+                        mainHandler.postDelayed({ scheduleNextChar() }, nextDelay)
+                    }, retypeDelay)
+                }, deleteDelay)
+                return
+            }
+
+            if (currentIndex >= chars.size) {
+                // 输入完成
+                Log.d(TAG, "Character-by-character input completed: $currentText")
+                onComplete()
+                return
+            }
+
+            val char = chars[currentIndex]
+            currentIndex++
+
+            // 判断是否打错字 (typoRate 概率)
+            val shouldTypo = humanMode && Random.nextDouble() < typoRate && pinyinSimilarChars.containsKey(char)
+
+            if (shouldTypo) {
+                // 打错字
+                val typoChar = getTypoChar(char)
+                currentText.append(typoChar)
+                setTextToInputField(currentText.toString())
+                Log.d(TAG, "Typed wrong: $typoChar (should be $char)")
+
+                // 标记需要修正
+                pendingTypoFix = true
+                correctChar = char
+
+                // 等待一会儿后修正（模拟发现错误的时间）
+                val noticeDelay = 200L + Random.nextInt(400) // 200-600ms 发现错误
+                mainHandler.postDelayed({ scheduleNextChar() }, noticeDelay)
+            } else {
+                // 正常输入
+                currentText.append(char)
+                setTextToInputField(currentText.toString())
+                Log.d(TAG, "Typed: $char, current: $currentText")
+
+                // 计算下一个字符的输入延迟
+                val delay = getCharInputDelay()
+                mainHandler.postDelayed({ scheduleNextChar() }, delay)
+            }
+        }
+
+        // 开始逐字输入
+        scheduleNextChar()
+    }
+
+    /**
+     * 获取单个字符的输入延迟（模拟人类打字速度的变化）
+     */
+    private fun getCharInputDelay(): Long {
+        // 基础打字速度：80-200ms 每字符
+        val baseDelay = 80L + Random.nextInt(120)
+
+        // 5% 概率有小停顿（思考下一个字）
+        val thinkingPause = if (Random.nextInt(100) < 5) {
+            200L + Random.nextInt(300) // 200-500ms 思考
+        } else {
+            0L
+        }
+
+        return baseDelay + thinkingPause
+    }
+
+    /**
+     * 将文本设置到输入框
+     */
+    private fun setTextToInputField(text: String) {
+        val rootNode = rootInActiveWindow ?: return
+
+        try {
+            val focusedNode = rootNode.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+            if (focusedNode != null) {
+                val arguments = Bundle()
+                arguments.putCharSequence(
+                    AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
+                    text
+                )
+                focusedNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
+                focusedNode.recycle()
+            } else {
+                val editTexts = findNodesByClassName(rootNode, "android.widget.EditText")
+                if (editTexts.isNotEmpty()) {
+                    val arguments = Bundle()
+                    arguments.putCharSequence(
+                        AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
+                        text
+                    )
+                    editTexts.first().performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
+                }
+                editTexts.forEach { it.recycle() }
+            }
+        } finally {
+            rootNode.recycle()
+        }
+    }
+
+    /**
+     * 主要的文本输入方法（现在使用逐字输入）
+     */
+    private fun inputText(text: String, onComplete: () -> Unit = {}) {
+        inputTextCharByChar(text, onComplete)
     }
 
     private fun clickSendButton() {
