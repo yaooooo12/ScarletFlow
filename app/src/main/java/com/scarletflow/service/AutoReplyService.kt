@@ -158,25 +158,31 @@ class AutoReplyService : AccessibilityService() {
 
                 try {
                     performAutoReply()
+                    // 注意：下一次调度在 performAutoReply 内部完成（发送成功后）
                 } catch (e: Exception) {
                     Log.e(TAG, "Error in performAutoReply", e)
-                }
-
-                // 无论成功失败，继续调度下一次（使用随机间隔）
-                val randomInterval = getRandomizedInterval()
-                Log.d(TAG, "Scheduling next send #${sendCount+1} in ${randomInterval}ms")
-
-                // 确保 handler 还有效
-                if (isRunning && ::handler.isInitialized) {
-                    handler.postDelayed(this, randomInterval)
-                    Log.d(TAG, "postDelayed succeeded")
-                } else {
-                    Log.w(TAG, "Handler not available or stopped")
+                    // 出错时也要调度下一次，否则会停止
+                    scheduleNextSend()
                 }
             } else {
                 Log.d(TAG, "isRunning is false, stopping")
             }
         }
+    }
+
+    /**
+     * 调度下一次发送
+     * 在当前消息发送完成后调用
+     */
+    private fun scheduleNextSend() {
+        if (!isRunning || !::handler.isInitialized) {
+            Log.w(TAG, "Cannot schedule next send: isRunning=$isRunning")
+            return
+        }
+
+        val randomInterval = getRandomizedInterval()
+        Log.d(TAG, "Scheduling next send #${sendCount + 1} in ${randomInterval}ms (after send complete)")
+        handler.postDelayed(sendTask, randomInterval)
     }
 
     /**
@@ -327,6 +333,7 @@ class AutoReplyService : AccessibilityService() {
 
         val rootNode = rootInActiveWindow ?: run {
             Log.w(TAG, "Root node is null")
+            scheduleNextSend() // 也要调度下一次
             return
         }
 
@@ -334,6 +341,7 @@ class AutoReplyService : AccessibilityService() {
         val contentToSend = getRandomReplyContent()
         if (contentToSend.isEmpty()) {
             Log.w(TAG, "No content to send")
+            scheduleNextSend() // 也要调度下一次
             return
         }
         Log.d(TAG, "Selected content: $contentToSend")
@@ -354,18 +362,28 @@ class AutoReplyService : AccessibilityService() {
                             mainHandler.postDelayed({
                                 try {
                                     clickSendButton()
+                                    Log.d(TAG, "Send complete, scheduling next...")
+                                    // 发送完成后，调度下一次（间隔从这里开始算）
+                                    scheduleNextSend()
                                 } catch (e: Exception) {
                                     Log.e(TAG, "Error in clickSendButton", e)
+                                    scheduleNextSend() // 出错也要继续
                                 }
                             }, sendDelay)
                         }
                     } catch (e: Exception) {
                         Log.e(TAG, "Error in inputText", e)
+                        scheduleNextSend() // 出错也要继续
                     }
                 }, focusDelay)
+            } else {
+                // 找不到输入框，也要调度下一次
+                Log.w(TAG, "Input box not found, scheduling next send anyway")
+                scheduleNextSend()
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error performing auto reply", e)
+            scheduleNextSend() // 出错也要继续
         } finally {
             try {
                 rootNode.recycle()
