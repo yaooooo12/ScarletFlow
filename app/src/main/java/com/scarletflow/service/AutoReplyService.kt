@@ -34,6 +34,7 @@ class AutoReplyService : AccessibilityService() {
         const val KEY_REPLY_CONTENT = "reply_content"
         const val KEY_INTERVAL = "interval"
         const val KEY_ENABLED = "enabled"
+        const val KEY_HUMAN_MODE = "human_mode"
 
         const val ACTION_START = "com.scarletflow.ACTION_START"
         const val ACTION_STOP = "com.scarletflow.ACTION_STOP"
@@ -46,9 +47,19 @@ class AutoReplyService : AccessibilityService() {
     private lateinit var handler: Handler
     private val mainHandler = Handler(Looper.getMainLooper())
     private var isRunning = false
-    private var replyContent = ""
+    private var replyContents = listOf<String>() // 支持多条内容
     private var intervalMs = 30000L // 默认30秒
+    private var humanMode = true // 拟人模式
     private var sendCount = 0
+
+    /**
+     * 随机获取一条回复内容
+     */
+    private fun getRandomReplyContent(): String {
+        if (replyContents.isEmpty()) return ""
+        if (replyContents.size == 1) return replyContents[0]
+        return replyContents[Random.nextInt(replyContents.size)]
+    }
 
     private val sendTask = object : Runnable {
         override fun run() {
@@ -149,8 +160,8 @@ class AutoReplyService : AccessibilityService() {
 
     fun startAutoReply() {
         loadSettings()
-        if (replyContent.isEmpty()) {
-            Log.w(TAG, "Reply content is empty")
+        if (replyContents.isEmpty()) {
+            Log.w(TAG, "Reply contents is empty")
             mainHandler.post {
                 Toast.makeText(this, "请先设置回复内容", Toast.LENGTH_SHORT).show()
             }
@@ -169,11 +180,15 @@ class AutoReplyService : AccessibilityService() {
 
         // 开始任务
         handler.post(sendTask)
-        updateNotification("自动回复运行中")
-        Log.d(TAG, "Auto reply started, interval: ${intervalMs}ms, content: $replyContent")
+        updateNotification("自动回复运行中 (${replyContents.size}条)")
+        Log.d(TAG, "Auto reply started, interval: ${intervalMs}ms, contents: ${replyContents.size} items")
 
         mainHandler.post {
-            Toast.makeText(this, "自动回复已启动", Toast.LENGTH_SHORT).show()
+            val msg = if (replyContents.size > 1)
+                "自动回复已启动 (${replyContents.size}条随机)"
+            else
+                "自动回复已启动"
+            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -188,8 +203,35 @@ class AutoReplyService : AccessibilityService() {
 
     private fun loadSettings() {
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        replyContent = prefs.getString(KEY_REPLY_CONTENT, "") ?: ""
+        val rawContent = prefs.getString(KEY_REPLY_CONTENT, "") ?: ""
+
+        // 按行分割，过滤空行
+        replyContents = rawContent
+            .split("\n")
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+
         intervalMs = prefs.getLong(KEY_INTERVAL, 30000L)
+        humanMode = prefs.getBoolean(KEY_HUMAN_MODE, true)
+        Log.d(TAG, "Loaded ${replyContents.size} reply contents, humanMode=$humanMode")
+    }
+
+    /**
+     * 根据内容长度计算拟人输入时间
+     * 模拟人类打字：每个字 150-300ms
+     */
+    private fun getHumanTypingDelay(content: String): Long {
+        if (!humanMode) return 500L // 非拟人模式固定500ms
+
+        val charCount = content.length
+        // 每个字 150-300ms，加上随机波动
+        val baseDelayPerChar = 150 + Random.nextInt(150) // 150-300ms
+        val typingTime = charCount * baseDelayPerChar
+
+        // 加上思考时间 200-500ms
+        val thinkingTime = 200 + Random.nextInt(300)
+
+        return (typingTime + thinkingTime).toLong()
     }
 
     private fun performAutoReply() {
@@ -200,23 +242,37 @@ class AutoReplyService : AccessibilityService() {
             return
         }
 
+        // 随机选择一条内容
+        val contentToSend = getRandomReplyContent()
+        if (contentToSend.isEmpty()) {
+            Log.w(TAG, "No content to send")
+            return
+        }
+        Log.d(TAG, "Selected content: $contentToSend")
+
         try {
             // 尝试找到输入框并发送消息
             if (findAndClickInputBox(rootNode)) {
+                // 计算拟人延迟：根据内容长度模拟打字时间
+                val typingDelay = getHumanTypingDelay(contentToSend)
+                Log.d(TAG, "Human typing delay: ${typingDelay}ms for ${contentToSend.length} chars")
+
                 mainHandler.postDelayed({
                     try {
-                        inputText(replyContent)
+                        inputText(contentToSend)
+                        // 输入完成后稍等一下再点发送，模拟检查内容
+                        val sendDelay = 300L + Random.nextInt(400) // 300-700ms
                         mainHandler.postDelayed({
                             try {
                                 clickSendButton()
                             } catch (e: Exception) {
                                 Log.e(TAG, "Error in clickSendButton", e)
                             }
-                        }, 500)
+                        }, sendDelay)
                     } catch (e: Exception) {
                         Log.e(TAG, "Error in inputText", e)
                     }
-                }, 500)
+                }, typingDelay)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error performing auto reply", e)

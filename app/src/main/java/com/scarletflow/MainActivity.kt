@@ -73,6 +73,11 @@ class MainActivity : AppCompatActivity() {
         binding.btnFloating.setOnClickListener {
             toggleFloatingButton()
         }
+
+        // 拟人模式开关
+        binding.switchHumanMode.setOnCheckedChangeListener { _, isChecked ->
+            saveHumanMode(isChecked)
+        }
     }
 
     private fun loadSettings() {
@@ -86,6 +91,10 @@ class MainActivity : AppCompatActivity() {
         val intervalMs = prefs.getLong(AutoReplyService.KEY_INTERVAL, 30000L)
         val intervalSec = intervalMs / 1000
         binding.etInterval.setText(intervalSec.toString())
+
+        // 加载拟人模式设置
+        val humanMode = prefs.getBoolean(AutoReplyService.KEY_HUMAN_MODE, true)
+        binding.switchHumanMode.isChecked = humanMode
     }
 
     private fun saveReplyContent(content: String) {
@@ -99,6 +108,13 @@ class MainActivity : AppCompatActivity() {
         getSharedPreferences(AutoReplyService.PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
             .putLong(AutoReplyService.KEY_INTERVAL, interval)
+            .apply()
+    }
+
+    private fun saveHumanMode(enabled: Boolean) {
+        getSharedPreferences(AutoReplyService.PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(AutoReplyService.KEY_HUMAN_MODE, enabled)
             .apply()
     }
 
