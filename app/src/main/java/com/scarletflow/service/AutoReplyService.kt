@@ -55,6 +55,38 @@ class AutoReplyService : AccessibilityService() {
     // 打错字概率 (5% = 人类正常打字错误率)
     private val typoRate = 0.05
 
+    // ========== 高级人类打字模拟参数 ==========
+
+    // 连击状态：连续打字时会加速
+    private var consecutiveChars = 0
+    private var lastCharTime = 0L
+
+    // 标点符号集合（打这些字符前后会停顿）
+    private val punctuations = setOf(
+        '，', '。', '！', '？', '、', '；', '：',
+        ',', '.', '!', '?', ';', ':',
+        '~', '～', '…', '—',
+        '\n', ' '
+    )
+
+    // 句末标点（需要更长停顿）
+    private val sentenceEndings = setOf('。', '！', '？', '.', '!', '?', '~', '～')
+
+    // 常用词组（打这些会更快，模拟肌肉记忆）
+    private val commonPhrases = listOf(
+        "哈哈", "哈哈哈", "嘿嘿", "呵呵",
+        "好的", "好哒", "好呀", "好啊",
+        "谢谢", "感谢", "多谢",
+        "厉害", "牛逼", "666", "nb",
+        "加油", "冲冲", "冲鸭",
+        "可以", "没问题", "好的好的",
+        "真的", "确实", "是的", "对的",
+        "喜欢", "爱了", "太棒了", "太强了",
+        "支持", "关注", "点赞",
+        "宝宝", "亲亲", "么么哒", "爱你",
+        "笑死", "绝了", "无语", "服了"
+    )
+
     /**
      * 拼音相似字映射表
      * 模拟人类在拼音输入法上常见的打错情况
@@ -486,7 +518,7 @@ class AutoReplyService : AccessibilityService() {
     }
 
     /**
-     * 逐字输入文本（带打错字和修正效果）
+     * 逐字输入文本（带打错字和修正效果 + 高级人类打字模拟）
      * @param text 要输入的完整文本
      * @param onComplete 输入完成后的回调
      */
@@ -498,11 +530,17 @@ class AutoReplyService : AccessibilityService() {
             return
         }
 
+        // 重置连击状态
+        consecutiveChars = 0
+        lastCharTime = System.currentTimeMillis()
+
         val chars = text.toCharArray()
+        val totalLength = chars.size
         var currentIndex = 0
         var currentText = StringBuilder()
         var pendingTypoFix = false  // 是否有待修正的错字
         var correctChar: Char = ' ' // 正确的字符
+        var correctCharIndex = 0    // 正确字符的索引（用于计算延迟）
 
         fun scheduleNextChar() {
             if (pendingTypoFix) {
@@ -514,17 +552,23 @@ class AutoReplyService : AccessibilityService() {
                     setTextToInputField(currentText.toString())
                     Log.d(TAG, "Deleted typo, current: $currentText")
 
-                    // 再输入正确的字符
-                    val retypeDelay = 80L + Random.nextInt(120) // 80-200ms 重新输入
+                    // 再输入正确的字符（修正时打得更快）
+                    val retypeDelay = getQuickRetypeDelay()
                     mainHandler.postDelayed({
                         currentText.append(correctChar)
                         setTextToInputField(currentText.toString())
                         Log.d(TAG, "Fixed typo, current: $currentText")
                         pendingTypoFix = false
 
-                        // 继续下一个字符
-                        val nextDelay = getCharInputDelay()
-                        mainHandler.postDelayed({ scheduleNextChar() }, nextDelay)
+                        // 继续下一个字符（获取下一个字符的延迟）
+                        if (currentIndex < chars.size) {
+                            val nextChar = chars[currentIndex]
+                            val prevChar = if (currentText.isNotEmpty()) currentText.last() else null
+                            val nextDelay = getCharInputDelay(nextChar, currentIndex, totalLength, text, prevChar)
+                            mainHandler.postDelayed({ scheduleNextChar() }, nextDelay)
+                        } else {
+                            scheduleNextChar() // 直接完成
+                        }
                     }, retypeDelay)
                 }, deleteDelay)
                 return
@@ -538,10 +582,18 @@ class AutoReplyService : AccessibilityService() {
             }
 
             val char = chars[currentIndex]
+            val prevChar = if (currentIndex > 0) chars[currentIndex - 1] else null
+
+            // 先计算这个字符的输入延迟（在输入之前计算，模拟"想好再打"）
+            val delay = getCharInputDelay(char, currentIndex, totalLength, text, prevChar)
+
             currentIndex++
 
-            // 判断是否打错字 (typoRate 概率)
-            val shouldTypo = humanMode && Random.nextDouble() < typoRate && pinyinSimilarChars.containsKey(char)
+            // 判断是否打错字 (typoRate 概率，但标点符号不会打错)
+            val shouldTypo = humanMode &&
+                    Random.nextDouble() < typoRate &&
+                    pinyinSimilarChars.containsKey(char) &&
+                    !punctuations.contains(char)
 
             if (shouldTypo) {
                 // 打错字
@@ -553,6 +605,7 @@ class AutoReplyService : AccessibilityService() {
                 // 标记需要修正
                 pendingTypoFix = true
                 correctChar = char
+                correctCharIndex = currentIndex - 1
 
                 // 等待一会儿后修正（模拟发现错误的时间）
                 val noticeDelay = 200L + Random.nextInt(400) // 200-600ms 发现错误
@@ -563,31 +616,115 @@ class AutoReplyService : AccessibilityService() {
                 setTextToInputField(currentText.toString())
                 Log.d(TAG, "Typed: $char, current: $currentText")
 
-                // 计算下一个字符的输入延迟
-                val delay = getCharInputDelay()
+                // 使用计算好的延迟
                 mainHandler.postDelayed({ scheduleNextChar() }, delay)
             }
         }
 
-        // 开始逐字输入
-        scheduleNextChar()
+        // 开始逐字输入（第一个字之前有个小停顿，模拟"准备开始打字"）
+        val startDelay = 100L + Random.nextInt(200)
+        mainHandler.postDelayed({ scheduleNextChar() }, startDelay)
     }
 
     /**
-     * 获取单个字符的输入延迟（模拟人类打字速度的变化）
+     * 高级人类打字模拟 - 获取单个字符的输入延迟
+     *
+     * 考虑因素：
+     * 1. 位置节奏：开头慢→中间快→结尾慢
+     * 2. 标点停顿：标点符号前后停顿更久
+     * 3. 连击加速：连续打字越打越快（有上限）
+     * 4. 随机卡顿：偶尔突然变慢（模拟分心）
+     * 5. 常用词加速：打熟悉词组时更快
      */
-    private fun getCharInputDelay(): Long {
-        // 基础打字速度：80-200ms 每字符
-        val baseDelay = 80L + Random.nextInt(120)
-
-        // 5% 概率有小停顿（思考下一个字）
-        val thinkingPause = if (Random.nextInt(100) < 5) {
-            200L + Random.nextInt(300) // 200-500ms 思考
-        } else {
-            0L
+    private fun getCharInputDelay(
+        char: Char,
+        index: Int,
+        totalLength: Int,
+        fullText: String,
+        prevChar: Char?
+    ): Long {
+        // ===== 1. 基础延迟（根据位置的节奏曲线）=====
+        // 开头慢（思考怎么开始）→ 中间快（进入状态）→ 结尾慢（检查确认）
+        val position = index.toDouble() / totalLength
+        val rhythmFactor = when {
+            position < 0.15 -> 1.3 + Random.nextDouble() * 0.3  // 开头：1.3-1.6倍慢
+            position < 0.75 -> 0.8 + Random.nextDouble() * 0.3  // 中间：0.8-1.1倍快
+            else -> 1.1 + Random.nextDouble() * 0.3             // 结尾：1.1-1.4倍慢
         }
 
-        return baseDelay + thinkingPause
+        // 基础速度：60-150ms
+        var baseDelay = (60L + Random.nextInt(90)) * rhythmFactor
+
+        // ===== 2. 标点符号处理 =====
+        if (punctuations.contains(char)) {
+            // 打标点本身慢一些（要切换输入法或找符号）
+            baseDelay *= 1.5 + Random.nextDouble() * 0.5 // 1.5-2.0倍
+        }
+        if (prevChar != null && sentenceEndings.contains(prevChar)) {
+            // 上一个是句末标点，这个字之前要停顿（新句子思考）
+            baseDelay += 300L + Random.nextInt(400) // 额外 300-700ms
+        }
+
+        // ===== 3. 连击加速 =====
+        // 连续打字时，人会越打越快（肌肉进入节奏）
+        val now = System.currentTimeMillis()
+        if (now - lastCharTime < 500) {
+            consecutiveChars++
+        } else {
+            consecutiveChars = 0 // 超过500ms没打字，重置连击
+        }
+        lastCharTime = now
+
+        // 连击加速：最多加速到 60%（连续10个字后达到最快）
+        val comboBonus = minOf(consecutiveChars, 10) * 0.04 // 每字加速4%，最多40%
+        baseDelay *= (1.0 - comboBonus)
+
+        // ===== 4. 常用词组加速 =====
+        // 检查当前位置是否在打常用词组
+        val isInCommonPhrase = commonPhrases.any { phrase ->
+            val startIdx = maxOf(0, index - phrase.length + 1)
+            val endIdx = minOf(fullText.length, index + phrase.length)
+            val window = fullText.substring(startIdx, endIdx)
+            window.contains(phrase)
+        }
+        if (isInCommonPhrase) {
+            baseDelay *= 0.6 + Random.nextDouble() * 0.2 // 0.6-0.8倍（更快）
+        }
+
+        // ===== 5. 随机卡顿（模拟人类分心、思考） =====
+        val randomEvent = Random.nextInt(100)
+        val extraPause = when {
+            randomEvent < 2 -> {
+                // 2% 概率大卡顿（看手机通知、分心了）
+                800L + Random.nextInt(700) // 800-1500ms
+            }
+            randomEvent < 7 -> {
+                // 5% 概率小卡顿（想下一个字）
+                200L + Random.nextInt(300) // 200-500ms
+            }
+            randomEvent < 12 -> {
+                // 5% 概率微停顿
+                80L + Random.nextInt(120)  // 80-200ms
+            }
+            else -> 0L
+        }
+
+        // ===== 6. 添加随机抖动（避免过于规律）=====
+        val jitter = (-20L..20L).random()
+
+        val finalDelay = maxOf(40L, baseDelay.toLong() + extraPause + jitter)
+
+        Log.d(TAG, "Char '$char' delay: ${finalDelay}ms (pos=${"%.0f".format(position*100)}%, combo=$consecutiveChars, phrase=$isInCommonPhrase)")
+
+        return finalDelay
+    }
+
+    /**
+     * 简化版延迟（用于修正错字后重新输入）
+     */
+    private fun getQuickRetypeDelay(): Long {
+        // 修正错误时打得更快（因为刚打过，知道要打什么）
+        return 50L + Random.nextInt(80)
     }
 
     /**
